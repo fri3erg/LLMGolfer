@@ -1,0 +1,50 @@
+# --- Python Artefacts ---
+# Byte-compiled, optimized, or C extension files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution and packaging
+.Python
+build/
+dist/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+
+# Virtual Environments - common folder names
+.venv/
+venv/
+env/
+
+# --- IDE & System Files ---
+# VSCode
+.vscode/
+# PyCharm
+.idea/
+# macOS
+.DS_Store
+
+# --- Project-Specific Files ---
+# Most importantly: secrets and configuration.
+# NEVER commit your API key to Git!
+.env
+secrets.ini
+config.py
+credentials.json
+
+# Log files
+*.log
+logs/
+
+# Calibration data or captured images from testing
+calibration_data.json
+*.jpg
+*.png
+test_captures/
+
+.env
+secrets.ini
+config.py
+credentials.json

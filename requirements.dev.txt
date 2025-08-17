@@ -1,0 +1,13 @@
+# requirements.dev.txt - For Windows/Mac development
+
+# For interacting with the OpenAI API
+openai
+
+# For computer vision (will use image files instead of a live camera)
+opencv-python
+numpy
+
+# For local, offline Text-to-Speech
+pyttsx3
+
+python-dotenv
