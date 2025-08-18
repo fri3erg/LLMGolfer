@@ -1,64 +1,88 @@
-# main_controller.py
-import llm_golfer
-import vision_system
-import audio_manager # Assume you have this module for TTS
+# main_controller.py (Iterative Learning Version)
+import math
+from llm_golfer import AssistantGolfer
+import audio_manager
 import hardware_controller_dev  # Use the mock version for Windows
+import feedback_generator # <-- Import the new module
+
+# --- Game Configuration ---
+START_COORDS = (500, 0) # The ball always starts here
+HOLE_COORDS = (300, 800)  # The target
+WIN_RADIUS = 25           # How close the ball needs to be to the hole to win
+MAX_SHOTS = 10            # Prevent infinite loops
 
 def run_game():
-    print("Starting Miniature Golf Simulator! ⛳")
-    
-    # --- Initialization ---
-    camera = vision_system.initialize_camera()
-    # You would run a calibration sequence here to find the hole's pixel location
-    # and define the playing boundaries. For now, we assume they are known.
-    
-    game_over = False
-    shot_count = 0
-    
-    while not game_over:
-        # 1. Reset Ball to Start
-        hardware_controller_dev.reset_ball()
-        
-        # 2. Get Ball Position
-        # In a real game, the ball position would change after each shot.
-        # For simplicity in this first version, we'll assume it's always at the start.
-        # A more complex loop would get the position *after* a shot.
-        
-        # Let's pretend the starting position is random
-        import random
-        ball_pos = random.randint(-90, 90) 
-        
-        print(f"\n--- Shot {shot_count + 1} ---")
-        print(f"Computer vision sees the ball at position: {ball_pos}")
-        
-        # 3. Ask LLM for a Decision
-        prompt = f"The ball is at position {ball_pos}. The hole is at 0. Take your shot."
-        decision = llm_golfer.get_llm_decision(prompt)
-        
-        if not decision:
-            print("LLM failed to make a decision. Skipping turn.")
-            continue
-        
-        audio_manager.play_speech(decision['commentary'])
+    print("⛳ Starting Miniature Golf Simulator - Iterative Learning Mode ⛳")
 
-        # 4. Announce and Execute Shot
-        print(f"LLM Commentary: '{decision['commentary']}'")
-        # audio_manager.play_speech(decision['commentary'])
-        
-        print(f"Executing shot: Aim={decision['aim']}, Force={decision['force']}")
-        hardware_controller_dev.aim_club(decision['aim'])
-        hardware_controller_dev.strike_ball(decision['force'])
-        
+    # --- Initialization ---
+    golfer = AssistantGolfer()
+    golfer.start_new_game()
+    shot_history = []
+    shot_count = 0
+    game_over = False
+
+    while not game_over:
         shot_count += 1
+        print(f"\n--- Shot {shot_count} ---")
+
+        # 1. Build the prompt from the shot history
+        if not shot_history:
+            # First shot prompt is special
+            prompt = "This is your first shot. Make your best guess to start."
+        else:
+            # Subsequent prompts include history
+            history_str = "\n".join(shot_history)
+            prompt = (
+                f"Here is the history of your shots:\n{history_str}\n"
+                f"The ball is now back at the start. Analyze your past attempts and take your next shot."
+            )
+
+        print(f"Sending prompt to LLM:\n{prompt}\n")
+
+        # 2. Get the LLM's decision
+        decision = golfer.get_next_shot_decision(prompt)
+
+        if not decision or "aim_degrees" not in decision:
+            print("LLM failed to make a valid decision. Ending game.")
+            break
+
+        audio_manager.play_speech(decision['commentary'])
         
-        # 5. Check Game State
-        # In a real game, you would now use vision_system.get_ball_position()
-        # to see where the ball landed and check if it's in the hole.
-        # For this example, we'll just end the game after one shot.
-        print("Shot executed. In a full version, I would now find the ball's new position.")
-        game_over = True # End after one loop for this example
+        aim = decision['aim_degrees']
+        force = decision['strike_force']
+        print(f"Executing shot: Aim={aim}°, Force={force}%")
+
+        landing_coords = hardware_controller_dev.execute_shot_physics(aim, force, START_COORDS)
+        print(f"Ball landed at: {landing_coords}")
         
-    print("\nGame Over!")
+        # --- NEW: Generate and record NL feedback ---
+        nl_feedback = feedback_generator.get_nl_feedback(landing_coords, HOLE_COORDS, START_COORDS)
+        print(f"Feedback: {nl_feedback}")
+        
+        shot_result = (
+            f"Shot {shot_count}: Aim={aim}°, Force={force}% -> Ball landed at {landing_coords}. "
+            f"Hint: {nl_feedback}" # <-- Add the hint here
+        )
+        shot_history.append(shot_result)
+
+
+        # 5. Check for a win or loss
+        distance_to_hole = math.dist(landing_coords, HOLE_COORDS)
+        print(f"Distance to hole: {distance_to_hole:.2f} units.")
+
+        if distance_to_hole <= WIN_RADIUS:
+            print("\n🎉 Congratulations! You got the ball in the hole! 🎉")
+            audio_manager.play_speech("Incredible! A perfect shot, if I do say so myself.")
+            game_over = True
+        elif shot_count >= MAX_SHOTS:
+            print("\nMaximum shots reached. Game over.")
+            audio_manager.play_speech("Well, that didn't go as planned. Let's try again another time.")
+            game_over = True
+
+    print("\n--- Game Over ---")
+    print("Final Shot History:")
+    for entry in shot_history:
+        print(entry)
 
 if __name__ == "__main__":
     run_game()
