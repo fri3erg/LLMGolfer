@@ -307,7 +307,7 @@ if __name__ == "__main__":
                 swing_servo(swing_power)
                 time.sleep(1)
                 
-                cycle_actuator(extend_time=2, retract_time=2)
+                cycle_actuator(extend_time=10, retract_time=10)
 
             except ValueError:
                 print("Invalid input. Please enter numbers for angle and power.")

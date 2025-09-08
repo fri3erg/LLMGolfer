@@ -253,7 +253,7 @@ if __name__ == "__main__":
             swing_servo(SHOT_POWER)
             time.sleep(1)
             
-            cycle_actuator(extend_time=2, retract_time=2)
+            cycle_actuator(extend_time=10, retract_time=10)
         else:
             print("\nCould not find the ball. Halting operation.")
         
