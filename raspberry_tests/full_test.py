@@ -14,8 +14,8 @@ STEP_PIN = 20
 DIR_PIN = 21
 LIMIT_SWITCH_PIN = 26
 GPIO_CHIP = 'gpiochip4'
-TOTAL_STEPS_FOR_180_DEGREES = 350
-HOMING_SPEED = 0.001
+TOTAL_STEPS_FOR_180_DEGREES = 300
+HOMING_SPEED = 0.002
 MOVE_SPEED = 0.001
 
 # -- Servo Motor (The "Shooter") --
@@ -106,7 +106,7 @@ def setup_all():
     pwm_enable(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL)
     
     pwm_set_period(ACTUATOR_PWM_CHIP, ACTUATOR_PWM_CHANNEL, ACTUATOR_PWM_FREQ)
-    pwm_enable(ACTUATOR_PWM_CHIP, ACTuator_PWM_CHANNEL)
+    pwm_enable(ACTUATOR_PWM_CHIP, ACTUATOR_PWM_CHANNEL)
     print("✅ Hardware setup complete.")
 
 def cleanup_all():
@@ -159,15 +159,28 @@ def find_ball_x_coordinate():
     return None
 
 def home_stepper():
+    """
+    Homes the stepper, then backs off slightly to release the switch.
+    """
     global current_stepper_position
     print("Homing stepper motor...")
     dir_line.set_value(COUNTER_CLOCKWISE)
+    # Move until the switch is pressed
     while limit_switch_line.get_value() == 0:
         step_line.set_value(1)
         time.sleep(HOMING_SPEED)
         step_line.set_value(0)
         time.sleep(HOMING_SPEED)
-    current_stepper_position = 0
+    
+    print("✅ Limit switch triggered.")
+    
+    # --- ADD THIS PART ---
+    # Back off the switch a few steps to release it
+    time.sleep(0.1)
+    move_stepper(steps=10, direction=CLOCKWISE, speed=HOMING_SPEED)
+    # -------------------
+
+    current_stepper_position = 0 # Define this point as the true zero
     print("✅ Stepper homed. Position is now 0.")
 
 def move_stepper(steps, direction, speed):
@@ -178,22 +191,29 @@ def move_stepper(steps, direction, speed):
         step_line.set_value(0)
         time.sleep(speed)
 
-def move_to_angle(angle):
-    global current_stepper_position
-    if not 0 <= angle <= 180:
-        print(f"Error: Target angle {angle}° is out of 0-180 range.")
-        return
+
+def map_angle_to_steps_non_linear(angle):
+    """
+    Maps an angle (0-180) to a step position (0-300) using a fractional exponent
+    for fine-tuned control.
+    """
+    # The exponent is the "tuning knob".
+    # 1.0 = linear
+    # 1.5 = calm curve (120° -> ~179 steps)
+    # 3.0 = harsh curve (120° -> ~156 steps)
+    exponent = 1.5
+
+    # 1. Normalize angle from [0, 180] to [-1, 1].
+    normalized_input = (angle / 90.0) - 1.0
     
-    target_steps = int((angle / 180.0) * TOTAL_STEPS_FOR_180_DEGREES)
-    steps_to_move = target_steps - current_stepper_position
+    # 2. Apply the easing function, preserving the sign.
+    sign = np.sign(normalized_input)
+    eased_output = sign * (abs(normalized_input) ** exponent)
     
-    print(f"Moving to angle: {angle:.1f}° (target step: {target_steps})...")
+    # 3. De-normalize the output from [-1, 1] back to the step range [0, 300].
+    target_steps = (eased_output + 1.0) / 2.0 * TOTAL_STEPS_FOR_180_DEGREES
     
-    if steps_to_move > 0: move_stepper(steps_to_move, CLOCKWISE, MOVE_SPEED)
-    elif steps_to_move < 0: move_stepper(abs(steps_to_move), COUNTER_CLOCKWISE, MOVE_SPEED)
-    
-    current_stepper_position = target_steps
-    print(f"Move complete. Current position: {current_stepper_position} steps.")
+    return int(TOTAL_STEPS_FOR_180_DEGREES-target_steps)
 
 def swing_servo(power):
     print(f"--- Performing servo swing with {power}% power ---")
@@ -224,6 +244,29 @@ def cycle_actuator(extend_time, retract_time):
     pwm_set_duty_cycle(ACTUATOR_PWM_CHIP, ACTUATOR_PWM_CHANNEL, 0)
     print("✅ Actuator cycle complete.")
 
+# RENAME the move_to_angle function to move_to_steps
+def move_to_steps(target_steps):
+    global current_stepper_position
+    # This function is the same as move_to_angle, just with a new name
+    # and using TOTAL_STEPS_FOR_RANGE
+    if not 0 <= target_steps <= TOTAL_STEPS_FOR_180_DEGREES:
+        print(f"Error: Target steps {target_steps} is out of range.")
+        return
+    
+    steps_to_move = target_steps - current_stepper_position
+    
+    print(f"Moving to step: {target_steps}...")
+    
+    if steps_to_move > 0:
+        move_stepper(steps_to_move, CLOCKWISE, MOVE_SPEED)
+    elif steps_to_move < 0:
+        move_stepper(abs(steps_to_move), COUNTER_CLOCKWISE, MOVE_SPEED)
+    else:
+        print("Motor is already at the target position.")
+    
+    current_stepper_position = target_steps
+    print(f"Move complete. Current position: {current_stepper_position} steps.")
+
 # =============================================================================
 # --- MAIN PROGRAM SEQUENCE ---
 # =============================================================================
@@ -232,28 +275,29 @@ if __name__ == "__main__":
         setup_all()
         print("\n--- ⛳ VISION GOLF MACHINE INITIALIZED ⛳ ---\n")
         
-        # 1. Home the stepper to establish the zero point.
         home_stepper()
         time.sleep(1)
 
-        # 2. Use the camera to find the ball's position.
         ball_x = find_ball_x_coordinate()
 
-        # 3. If a ball is found, execute the shot sequence.
         if ball_x is not None:
-            # Calculate the target angle.
-            # This maps the camera's X-coordinate range (0 to CAMERA_WIDTH)
-            # to the stepper's angle range (0 to 180).
+            # --- THIS IS THE MODIFIED PART ---
+            # 1. Convert pixel X to a 0-180 degree conceptual angle
             target_angle = (ball_x / CAMERA_WIDTH) * 180.0
             
-            # Execute the sequence
-            move_to_angle(target_angle)
-            time.sleep(0.5)
+            # 2. Convert the angle to steps using our new non-linear function
+            target_steps = map_angle_to_steps_non_linear(target_angle)
             
+            print(f"Ball X: {ball_x} -> Angle: {target_angle:.1f}° -> Non-Linear Steps: {target_steps}")
+            
+            # 3. Move to the calculated step position
+            move_to_steps(target_steps)
+            # ---------------------------------
+            
+            time.sleep(0.5)
             swing_servo(SHOT_POWER)
             time.sleep(1)
-            
-            cycle_actuator(extend_time=10, retract_time=10)
+            cycle_actuator(extend_time=2, retract_time=2)
         else:
             print("\nCould not find the ball. Halting operation.")
         

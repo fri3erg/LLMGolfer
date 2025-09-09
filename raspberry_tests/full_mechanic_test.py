@@ -179,7 +179,8 @@ def move_stepper(steps, direction, speed):
         speed (float): The delay between step pulses, controlling speed.
     """
     dir_line.set_value(direction)
-    for _ in range(steps):
+    for step in range(steps):
+        print(step)
         step_line.set_value(1)
         time.sleep(speed)
         step_line.set_value(0)
@@ -207,6 +208,9 @@ def move_to_angle(angle):
         move_stepper(steps_to_move, CLOCKWISE, MOVE_SPEED)
     elif steps_to_move < 0:
         move_stepper(abs(steps_to_move), COUNTER_CLOCKWISE, MOVE_SPEED)
+    else:
+        # Add this block for better feedback
+        print("Motor is already at the target angle. No move needed.")
     
     current_stepper_position = target_steps
     print(f"Move complete. Current position: {current_stepper_position} steps.")
