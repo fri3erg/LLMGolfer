@@ -1,55 +1,64 @@
+# feedback_generator.py
 import math
 
-def get_nl_feedback(landing_coords, hole_coords, start_coords):
+def get_fuzzy_feedback(ball_pos, hole_pos):
     """
-    Analyzes a shot's outcome and generates natural language feedback using vector math.
-    """
-    feedback_parts = []
-
-    # --- 1. Analyze Strength (Distance) ---
-    shot_distance = math.dist(start_coords, landing_coords)
-    ideal_distance = math.dist(start_coords, hole_coords)
-    distance_error_ratio = (shot_distance - ideal_distance) / ideal_distance
-
-    if distance_error_ratio < -0.4:
-        feedback_parts.append("way too weak")
-    elif distance_error_ratio < -0.1: # Adjusted for more sensitive feedback
-        feedback_parts.append("a bit too weak")
-    elif distance_error_ratio > 0.4:
-        feedback_parts.append("way too strong")
-    elif distance_error_ratio > 0.1: # Adjusted for more sensitive feedback
-        feedback_parts.append("a bit too strong")
-
-    # --- 2. Analyze Aim (Direction) with an extra layer of feedback ---
-    # Vector from start to hole (the ideal path)
-    vec_ideal_x = hole_coords[0] - start_coords[0]
-    vec_ideal_y = hole_coords[1] - start_coords[1]
-
-    # Vector from start to where the ball landed (the actual path)
-    vec_actual_x = landing_coords[0] - start_coords[0]
-    vec_actual_y = landing_coords[1] - start_coords[1]
+    Converts precise pixel coordinates into vague, natural language feedback.
     
-    # Calculate the angle error in degrees
-    angle_to_hole = math.atan2(vec_ideal_y, vec_ideal_x)
-    angle_of_shot = math.atan2(vec_actual_y, vec_actual_x)
-    angle_error_deg = math.degrees(angle_to_hole - angle_of_shot)
-
-    # --- NEW: Three tiers of directional feedback ---
-    if angle_error_deg > 15: # Large error to the right
-        feedback_parts.append("way too far to the right")
-    elif angle_error_deg > 5: # **NEW** Moderate error to the right
-        feedback_parts.append("off to the right")
-    elif angle_error_deg > 2: # Small error to the right
-        feedback_parts.append("slightly to the right")
-    elif angle_error_deg < -15: # Large error to the left
-        feedback_parts.append("way too far to the left")
-    elif angle_error_deg < -5: # **NEW** Moderate error to the left
-        feedback_parts.append("off to the left")
-    elif angle_error_deg < -2: # Small error to the left
-        feedback_parts.append("slightly to the left")
-
-    # --- 3. Combine the feedback ---
-    if not feedback_parts:
-        return "That was very close!"
+    Coordinate assumption (Standard Image):
+    X: 0 is Left, Max is Right.
+    Y: 0 is Top, Max is Bottom.
+    """
+    # Vector from Hole TO Ball
+    # Positive dx = Ball is to the RIGHT of hole
+    # Positive dy = Ball is BELOW hole (assuming Y grows down)
+    
+    dx = ball_pos[0] - hole_pos[0]
+    dy = ball_pos[1] - hole_pos[1]
+    
+    # --- Define Thresholds (in Pixels) ---
+    # Adjust these based on your camera resolution (640x480)
+    TINY_MISS = 20
+    MODERATE_MISS = 80
+    LARGE_MISS = 150
+    
+    feedback_parts = []
+    
+    # --- Analyze Horizontal (Left/Right) ---
+    direction_x = "right" if dx > 0 else "left"
+    abs_dx = abs(dx)
+    
+    if abs_dx < TINY_MISS:
+        # If it's extremely close horizontally, we might ignore it or say "dead center"
+        pass 
+    elif abs_dx < MODERATE_MISS:
+        feedback_parts.append(f"a little bit to the {direction_x}")
+    elif abs_dx < LARGE_MISS:
+        feedback_parts.append(f"too far to the {direction_x}")
     else:
-        return "Your shot was " + " and ".join(feedback_parts) + "."
+        feedback_parts.append(f"way, way too far to the {direction_x}")
+        
+    # --- Analyze Vertical (Short/Long) ---
+    # NOTE: This depends on camera orientation. 
+    # If Tee is at Bottom (High Y) and Hole is Top (Low Y):
+    # If Ball Y > Hole Y -> Ball is "Short" (didn't reach top)
+    # If Ball Y < Hole Y -> Ball is "Long" (went past top)
+    
+    # Let's assume standard setup: Tee (Bottom) -> Hole (Top)
+    direction_y = "short" if dy > 0 else "long" 
+    abs_dy = abs(dy)
+    
+    if abs_dy < TINY_MISS:
+        pass
+    elif abs_dy < MODERATE_MISS:
+        feedback_parts.append(f"just a little {direction_y}")
+    elif abs_dy < LARGE_MISS:
+        feedback_parts.append(f"quite {direction_y}")
+    else:
+        feedback_parts.append(f"way too {direction_y}")
+
+    # --- Combine ---
+    if not feedback_parts:
+        return "You were incredibly close, almost in!"
+    
+    return "You were " + " and ".join(feedback_parts) + "."

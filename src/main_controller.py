@@ -1,92 +1,259 @@
-# main_controller.py (with fix for tool call loop)
+# main_controller.py
+
 import math
+
+import time
+
+import sys
+
 from llm_golfer import AssistantGolfer
+
 import audio_manager
-import hardware_controller_dev
+
+import hardware_controller
+
 import feedback_generator
 
-# ... (Game Configuration is the same) ...
-START_COORDS = (500, 0) # The ball always starts here
-HOLE_COORDS = (300, 800)  # The target
-WIN_RADIUS = 25           # How close the ball needs to be to the hole to win
-MAX_SHOTS = 10            # Prevent infinite loops
+import vision_system
+
+
+
+# --- Game Configuration ---
+
+# REAL WORLD Coordinates (Vision System)
+
+HOLE_X = 320  
+
+HOLE_Y = 100  
+
+HOLE_COORDS = (HOLE_X, HOLE_Y)
+
+
+
+WIN_DISTANCE_THRESHOLD = 30 # Pixels
+
+
 
 def run_game():
-    # ... (Initialization is the same) ...
-    print("⛳ Starting Miniature Golf Simulator - Iterative Learning Mode ⛳")
+
+    print("⛳ Starting STRICT HARDWARE Golf Game ⛳")
+
     golfer = AssistantGolfer()
+
     golfer.start_new_game()
+
     shot_history = []
+
     shot_count = 0
-    game_over = False
 
-    while not game_over:
-        shot_count += 1
-        print(f"\n--- Shot {shot_count} ---")
+    
 
-        # ... (Prompt building is the same) ...
-        history_str = "\n".join(shot_history) if shot_history else "No previous shots."
-        prompt = (
-            "The ball starts always at the start\n\n"
-            f"Shot History:\n{history_str}\n\n"
-            "Analyze the history and determine your next shot."
-        )
-        print(f"Sending prompt to LLM:\n{prompt}\n")
+    try:
 
-        # Get the LLM's decision and tool_call_id
-        response_data = golfer.get_next_shot_decision(prompt)
+        # 1. Setup
 
-        # Safely validate the response
-        if not response_data or not response_data.get("decision") or not response_data.get("tool_call_id"):
-            print("LLM response was incomplete or invalid. Ending game.")
-            break
-        
-        decision = response_data["decision"]
-        tool_call_id = response_data["tool_call_id"]
-        
-        # ... (Safely check decision keys) ...
-        required_keys = ['aim_degrees', 'strike_force', 'commentary']
-        if not all(key in decision for key in required_keys):
-            print("LLM decision was missing required keys. Ending game.")
-            break
-        
-        audio_manager.play_speech(decision['commentary'])
-        
-        aim = decision['aim_degrees']
-        force = decision['strike_force']
-        print(f"Executing shot: Aim={aim}°, Force={force}%")
+        hardware_controller.setup_all()
 
-        landing_coords = hardware_controller_dev.execute_shot_physics(aim, force, START_COORDS)
-        print(f"Ball landed at: {landing_coords}")
-        
-        nl_feedback = feedback_generator.get_nl_feedback(landing_coords, HOLE_COORDS, START_COORDS)
-        print(f"Feedback: {nl_feedback}")
-        
-        shot_result = (
-            f"Shot {shot_count}: Aim={aim}°, Force={force}% -> Ball landed at {landing_coords}. "
-            f"Hint: {nl_feedback}"
-        )
-        shot_history.append(shot_result)
-        
-        # *** ADD THIS LINE: Complete the loop by sending the tool result back ***
-        golfer.add_tool_response_to_history(tool_call_id, shot_result)
+        hardware_controller.home_stepper()
 
-        # ... (Win/loss checking is the same) ...
-        distance_to_hole = math.dist(landing_coords, HOLE_COORDS)
-        print(f"Distance to hole: {distance_to_hole:.2f} units.")
-        if distance_to_hole <= WIN_RADIUS:
-            print("\n🎉 Congratulations! You got the ball in the hole! 🎉")
-            audio_manager.play_speech("Incredible! A perfect shot, if I do say so myself.")
-            game_over = True
-        elif shot_count >= MAX_SHOTS:
-            print("\nMaximum shots reached. Game over.")
-            audio_manager.play_speech("Well, that didn't go as planned. Let's try again another time.")
-            game_over = True
+        
 
-    print("\n--- Game Over ---")
-    print("Final Shot History:")
-    for entry in shot_history:
-        print(entry)
+        while True:
+
+            shot_count += 1
+
+            print(f"\n--- Shot {shot_count} ---")
+
+            
+
+            # 2. Construct Prompt (HOLE LOCATION HIDDEN)
+
+            # The LLM only knows it needs to hit the ball.
+
+            history_str = "\n".join(shot_history) if shot_history else "No previous shots."
+
+            
+
+            # We constrain the prompt instructions
+
+            prompt = (
+
+                f"You are at the tee. Shot #{shot_count}.\n"
+
+                "The hole location is unknown to you, rely on feedback.\n"
+
+                f"History:\n{history_str}\n"
+
+                "Choose your shot:\n"
+
+                "- aim_degrees (strictly between 45 and 135)\n"
+
+                "- strike_force (0-100)\n"
+
+                "- commentary (keep it very short, under 10 words)"
+
+            )
+
+
+
+            # 3. Get Decision
+
+            print("🤔 Asking LLM...")
+
+            response = golfer.get_next_shot_decision(prompt)
+
+            
+
+            if response is None:
+
+                print("❌ Network/API Error: Could not get shot decision. Retrying...")
+
+                continue # Skip to the start of the loop to try again
+
+            
+
+            decision = response.get("decision", {})
+
+            tool_id = response.get("tool_call_id", {})
+
+            
+
+            aim = float(decision.get('aim_degrees', 90))
+
+            force = int(decision.get('strike_force', 50))
+
+            comment = decision.get('commentary', "Here we go.")
+
+            
+
+            # Play audio immediately
+
+            audio_manager.play_speech(comment)
+
+            
+
+            # 4. Execute Shot
+
+            hardware_controller.set_stepper_angle(aim)
+
+            time.sleep(0.5)
+
+            hardware_controller.swing_club(force)
+
+            
+
+            # 5. Wait for Settle (10 Seconds)
+
+            print("⏳ Waiting 10s for ball to settle...")
+
+            time.sleep(10)
+
+            
+
+            # 6. Vision & Feedback
+
+            # CALL THE NEW LIVE CAMERA FUNCTION HERE
+
+            ball_pos = vision_system.get_live_ball_position()
+
+            
+
+            if ball_pos is None:
+
+                print("⚠️ Ball not found. Assuming missed/out of bounds.")
+
+                nl_feedback = "I lost sight of the ball completely. It might be off the course."
+
+                distance = 9999
+
+            else:
+
+                # Calculate distance and generate feedback...
+
+                distance = math.dist(ball_pos, HOLE_COORDS)
+
+                nl_feedback = feedback_generator.get_fuzzy_feedback(ball_pos, HOLE_COORDS)
+
+                print(f"🗣️ Feedback: {nl_feedback}")
+
+            
+
+            shot_result = f"Shot {shot_count}: Aim {aim}, Force {force}. Result: {nl_feedback}"
+
+            shot_history.append(shot_result)
+
+            golfer.add_tool_response_to_history(tool_id, shot_result)
+
+            
+
+            # 7. Check Win Condition
+
+            if distance <= WIN_DISTANCE_THRESHOLD:
+
+                print("🎉 HOLE IN ONE! 🎉")
+
+                
+
+                # Ask for celebration
+
+                celebration_prompt = "You just sank the ball! Give me a loud, short celebration line!"
+
+                cel_resp = golfer.get_simple_text_response(celebration_prompt)
+
+                audio_manager.play_speech(cel_resp)
+
+                
+
+                print("🏆 Game Over. Winning.")
+
+                break # EXIT LOOP
+
+                
+
+            else:
+
+                # 8. Continuation Loop
+
+                print("❌ Missed. Preparing for next shot...")
+
+                
+
+                # Ask for reaction to the miss
+
+                reaction_prompt = f"You missed. Feedback was: {nl_feedback}. Give a 5-word regretful comment."
+
+                react_resp = golfer.get_simple_text_response(reaction_prompt)
+
+                audio_manager.play_speech(react_resp)
+
+                
+
+                # Reset Ball
+
+                hardware_controller.reset_ball_actuator()
+
+                
+
+                # Loop continues...
+
+
+
+    except KeyboardInterrupt:
+
+        print("User stopped game.")
+
+    except Exception as e:
+
+        print(f"CRITICAL ERROR: {e}")
+
+    finally:
+
+        hardware_controller.cleanup_all()
+
+        sys.exit()
+
+
 
 if __name__ == "__main__":
+
     run_game()
