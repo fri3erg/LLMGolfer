@@ -22,9 +22,9 @@ import vision_system
 
 # REAL WORLD Coordinates (Vision System)
 
-HOLE_X = 320  
+HOLE_X = 408  
 
-HOLE_Y = 100  
+HOLE_Y = 112  
 
 HOLE_COORDS = (HOLE_X, HOLE_Y)
 
