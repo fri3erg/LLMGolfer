@@ -1,31 +1,17 @@
-# hardware_controller.py
-
 import time
 
 import sys
 
-import numpy as np  # <--- THIS WAS MISSING
+import numpy as np
 
 import os
 
 import gpiod
 
+# Stepper Motor
 
 
-# =============================================================================
-
-# --- MASTER CONFIGURATION ---
-
-# =============================================================================
-
-
-
-# -- Stepper Motor --
-
-# We now use the FULL PATH to avoid "File not found" errors
-
-GPIO_CHIP_PATH = '/dev/gpiochip4' 
-
+GPIO_CHIP_PATH = "/dev/gpiochip4"
 
 
 STEP_PIN = 20
@@ -34,57 +20,51 @@ DIR_PIN = 21
 
 LIMIT_SWITCH_PIN = 4
 
-ENABLE_PIN = 22         
+ENABLE_PIN = 22
 
+# Stepper calibration: steps required for 180 degree rotation
 TOTAL_STEPS_FOR_180_DEGREES = 300
 
 
-
-# -- Speeds --
+# Speeds
 
 HOMING_SPEED = 0.002
 
 MOVE_SPEED = 0.001
 
 
+# Servo Motor
+# Pulse widths in nanoseconds (1ms = 1,000,000ns)
+# Standard servo range: 1-2ms
 
-# -- Servo Motor --
+SERVO_PWM_CHIP = 0
 
-SERVO_PWM_CHIP = 0      
-
-SERVO_PWM_CHANNEL = 0
+SERVO_PWM_CHANNEL = 3  # GPIO 19
 
 SERVO_PWM_FREQ = 50
 
-SERVO_REST_POS_NS = 1100 * 1000   
+SERVO_REST_POS_NS = 1500 * 1000  # Middle/neutral position
+SERVO_MAX_SWING_NS = 800 * 1000  # Full backswing (servo mounted upside down)
+SERVO_FORWARD_SWING_NS = 2500 * 1000  # Full forward swing
 
-SERVO_MAX_SWING_NS = 1900 * 1000  
 
+# Linear Actuator
 
+ACTUATOR_PWM_CHIP = 0
 
-# -- Linear Actuator --
-
-ACTUATOR_PWM_CHIP = 0   
-
-ACTUATOR_PWM_CHANNEL = 1
+ACTUATOR_PWM_CHANNEL = 2  # GPIO 18
 
 ACTUATOR_PWM_FREQ = 1000
 
 
-
-# -- Directions --
+# Directions
 
 CLOCKWISE = 1
 
 COUNTER_CLOCKWISE = 0
 
 
-
-# =============================================================================
-
-# --- HANDLES ---
-
-# =============================================================================
+# Handles
 
 gpiod_chip = None
 
@@ -93,56 +73,39 @@ step_line, dir_line, limit_switch_line, enable_line = None, None, None, None
 current_stepper_position = 0
 
 
-
-# =============================================================================
-
-# --- LOW LEVEL FUNCTIONS ---
-
-# =============================================================================
-
+# Low Level Functions
 
 
 def pwm_write(chip, channel, file, value):
-
     """Safely writes to a PWM file."""
 
     path = f"/sys/class/pwm/pwmchip{chip}/pwm{channel}/{file}"
 
     try:
 
-        with open(path, "w") as f: 
+        with open(path, "w") as f:
 
             f.write(str(value))
 
     except Exception as e:
-
-        # Only print warning if the file *should* exist (i.e. setup passed)
-
-        # We suppress errors during cleanup of a failed run
-
+        # Suppress errors during cleanup
         pass
 
 
-
 def pwm_export(chip, channel):
-
-    """Exports a PWM channel and WAITS for it to appear."""
+    """Exports a PWM channel and waits for filesystem to initialize."""
 
     export_path = f"/sys/class/pwm/pwmchip{chip}/export"
 
     pwm_dir = f"/sys/class/pwm/pwmchip{chip}/pwm{channel}"
 
-    
-
     if os.path.exists(pwm_dir):
 
-        return # Already exported
-
-        
+        return  # Already exported
 
     try:
 
-        with open(export_path, "w") as f: 
+        with open(export_path, "w") as f:
 
             f.write(str(channel))
 
@@ -152,49 +115,42 @@ def pwm_export(chip, channel):
 
         pass
 
-    
-
-    # CRITICAL: Wait for OS to create the files
-
+    # Wait for OS to create the PWM files
     for _ in range(10):
 
-        if os.path.exists(pwm_dir): return
+        if os.path.exists(pwm_dir):
+            return
 
         time.sleep(0.1)
 
-    print(f"⚠️ PWM Export warning: {pwm_dir} did not appear quickly.")
-
+    print(f"PWM Export warning: {pwm_dir} did not appear quickly.")
 
 
 def pwm_unexport(chip, channel):
 
     try:
 
-        with open(f"/sys/class/pwm/pwmchip{chip}/unexport", "w") as f: 
+        with open(f"/sys/class/pwm/pwmchip{chip}/unexport", "w") as f:
 
             f.write(str(channel))
 
-    except: pass
-
+    except:
+        pass
 
 
 def setup_all():
 
     global gpiod_chip, step_line, dir_line, limit_switch_line, enable_line
 
-    
+    print("Attempting to open GPIO chip...")
 
-    print(f"🔧 Hardware: Attempting to open GPIO chip...")
-
-    
-
-    # 1. Try the configured path first
+    # Try the configured path first
 
     target_chip = GPIO_CHIP_PATH
 
     if not os.path.exists(target_chip):
 
-        print(f"⚠️ Warning: {target_chip} not found. Searching for alternatives...")
+        print("Warning: {target_chip} not found. Searching for alternatives...")
 
         # Fallback strategy: Check 0 to 5
 
@@ -206,93 +162,122 @@ def setup_all():
 
                 break
 
-    
-
-    print(f"🔧 Hardware: Using {target_chip}")
-
-    
+    print(f"Using {target_chip}")
 
     try:
 
         gpiod_chip = gpiod.Chip(target_chip)
 
     except Exception as e:
-
-        print(f"❌ FATAL: Could not open {target_chip}. Error: {e}")
-
-        print("💡 TIP: Try running: pip uninstall gpiod (in venv) to use system lib.")
-
+        print(f"Error: Could not open {target_chip}. {e}")
         raise e
 
-
-
-    print("🔧 Hardware: Configuring Lines...")
+    print("Configuring Lines...")
 
     try:
+        # Configure GPIO lines using gpiod v2 API
 
-        step_line = gpiod_chip.get_line(STEP_PIN)
+        # STEP PIN
+        config = {
+            STEP_PIN: gpiod.LineSettings(
+                direction=gpiod.line.Direction.OUTPUT,
+                output_value=gpiod.line.Value.INACTIVE,
+            )
+        }
+        step_line = gpiod_chip.request_lines(consumer="stepper_step", config=config)
 
-        dir_line = gpiod_chip.get_line(DIR_PIN)
+        # DIR PIN
+        config = {
+            DIR_PIN: gpiod.LineSettings(
+                direction=gpiod.line.Direction.OUTPUT,
+                output_value=gpiod.line.Value.INACTIVE,
+            )
+        }
+        dir_line = gpiod_chip.request_lines(consumer="stepper_dir", config=config)
 
-        limit_switch_line = gpiod_chip.get_line(LIMIT_SWITCH_PIN)
+        # ENABLE PIN
+        # Default to 1 (Disable) on start
+        config = {
+            ENABLE_PIN: gpiod.LineSettings(
+                direction=gpiod.line.Direction.OUTPUT,
+                output_value=gpiod.line.Value.ACTIVE,
+            )
+        }
+        enable_line = gpiod_chip.request_lines(consumer="stepper_enable", config=config)
 
-        enable_line = gpiod_chip.get_line(ENABLE_PIN)
-
-        
-
-        step_line.request(consumer="stepper", type=gpiod.LINE_REQ_DIR_OUT)
-
-        dir_line.request(consumer="stepper", type=gpiod.LINE_REQ_DIR_OUT)
-
-        enable_line.request(consumer="stepper", type=gpiod.LINE_REQ_DIR_OUT)
-
-        limit_switch_line.request(consumer="limit", type=gpiod.LINE_REQ_DIR_IN, flags=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
-
-        
-
-        enable_line.set_value(1) # Disable motor
+        # LIMIT SWITCH
+        config = {
+            LIMIT_SWITCH_PIN: gpiod.LineSettings(
+                direction=gpiod.line.Direction.INPUT, bias=gpiod.line.Bias.PULL_UP
+            )
+        }
+        limit_switch_line = gpiod_chip.request_lines(
+            consumer="limit_switch", config=config
+        )
 
     except Exception as e:
-
-        print(f"❌ FATAL: Pin config failed. Check Pin numbers. Error: {e}")
-
+        print(f"Error: Pin configuration failed. Check pin numbers. {e}")
         raise e
 
+    print("Configuring PWM...")
 
+    # Dynamic PWM Chip Finder for Pi 5 / Pi 4
+    global SERVO_PWM_CHIP, ACTUATOR_PWM_CHIP
 
-    print("🔧 Hardware: Configuring PWM...")
+    found_chip = None
+    potential_chips = [0, 2, 1, 3]
+
+    for i in potential_chips:
+        path = f"/sys/class/pwm/pwmchip{i}"
+        if os.path.exists(path):
+            try:
+                with open(f"{path}/npwm", "r") as f:
+                    npwm = int(f.read().strip())
+                if npwm >= 2:
+                    found_chip = i
+                    print(f"Found PWM Chip {i} with {npwm} channels.")
+                    break
+            except:
+                continue
+
+    if found_chip is not None:
+        SERVO_PWM_CHIP = found_chip
+        ACTUATOR_PWM_CHIP = found_chip
+    else:
+        print("PWM Warning: Could not find a suitable PWM chip. Defaulting to 0.")
+        SERVO_PWM_CHIP = 0
+        ACTUATOR_PWM_CHIP = 0
 
     for channel in [SERVO_PWM_CHANNEL, ACTUATOR_PWM_CHANNEL]:
-
         pwm_export(SERVO_PWM_CHIP, channel)
 
-        time.sleep(0.2) # Extra safety wait
+        time.sleep(0.2)  # Extra safety wait
 
-        
-
-        period = int(1_000_000_000 / (SERVO_PWM_FREQ if channel == 0 else ACTUATOR_PWM_FREQ))
+        # Use correct frequency based on which channel this is
+        period = int(
+            1_000_000_000
+            / (SERVO_PWM_FREQ if channel == SERVO_PWM_CHANNEL else ACTUATOR_PWM_FREQ)
+        )
 
         pwm_write(SERVO_PWM_CHIP, channel, "period", period)
 
         pwm_write(SERVO_PWM_CHIP, channel, "enable", "1")
 
-    
-
     pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", SERVO_REST_POS_NS)
 
-    print("✅ Hardware: Setup complete.")
-
+    print("Setup complete.")
 
 
 def cleanup_all():
 
-    print("🧹 Hardware: Cleaning up...")
+    print("Cleaning up...")
 
     try:
 
-        if enable_line: enable_line.set_value(1) 
-
-        
+        if enable_line:
+            enable_line.set_value(
+                ENABLE_PIN, gpiod.line.Value.ACTIVE
+            )  # Disable (set to 1/Active)
 
         # Turn off PWM (Suppress errors if they weren't setup)
 
@@ -306,114 +291,79 @@ def cleanup_all():
 
         pwm_write(SERVO_PWM_CHIP, ACTUATOR_PWM_CHANNEL, "enable", "0")
 
-        
-
         pwm_unexport(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL)
 
         pwm_unexport(SERVO_PWM_CHIP, ACTUATOR_PWM_CHANNEL)
 
-        
+        if gpiod_chip:
+            gpiod_chip.close()
 
-        if gpiod_chip: gpiod_chip.close()
-
-    except Exception as e: 
+    except Exception as e:
 
         print(f"Cleanup Warning: {e}")
 
 
-
 def enable_motor():
-
     if enable_line:
-
-        enable_line.set_value(0)
-
+        # v2: request.set_value(offset, value)
+        enable_line.set_value(ENABLE_PIN, gpiod.line.Value.INACTIVE)  # 0 to Enable
         time.sleep(0.01)
 
 
-
 def disable_motor():
-
     if enable_line:
-
-        enable_line.set_value(1)
-
+        enable_line.set_value(ENABLE_PIN, gpiod.line.Value.ACTIVE)  # 1 to Disable
 
 
 # =============================================================================
-
 # --- MOVEMENT ---
-
 # =============================================================================
-
 
 
 def move_stepper_raw(steps, direction):
-
-    dir_line.set_value(direction)
+    # direction is 0 or 1
+    val_dir = gpiod.line.Value.ACTIVE if direction == 1 else gpiod.line.Value.INACTIVE
+    dir_line.set_value(DIR_PIN, val_dir)
 
     for _ in range(steps):
-
-        step_line.set_value(1)
-
+        step_line.set_value(STEP_PIN, gpiod.line.Value.ACTIVE)
         time.sleep(MOVE_SPEED)
-
-        step_line.set_value(0)
-
+        step_line.set_value(STEP_PIN, gpiod.line.Value.INACTIVE)
         time.sleep(MOVE_SPEED)
-
 
 
 def home_stepper():
-
     global current_stepper_position
-
-    print("🏠 Hardware: Homing...")
-
+    print("Homing...")
     enable_motor()
 
-    dir_line.set_value(COUNTER_CLOCKWISE)
+    dir_line.set_value(DIR_PIN, gpiod.line.Value.ACTIVE)
 
-    
-
-    while limit_switch_line.get_value() == 1:
-
-        step_line.set_value(1)
-
+    while limit_switch_line.get_value(LIMIT_SWITCH_PIN) == gpiod.line.Value.ACTIVE:
+        step_line.set_value(STEP_PIN, gpiod.line.Value.ACTIVE)
         time.sleep(HOMING_SPEED)
-
-        step_line.set_value(0)
-
+        step_line.set_value(STEP_PIN, gpiod.line.Value.INACTIVE)
         time.sleep(HOMING_SPEED)
-
-    
 
     time.sleep(0.1)
 
-    dir_line.set_value(CLOCKWISE)
+    dir_line.set_value(DIR_PIN, gpiod.line.Value.INACTIVE)
 
     for _ in range(10):
-
-        step_line.set_value(1)
-
+        step_line.set_value(STEP_PIN, gpiod.line.Value.ACTIVE)
         time.sleep(HOMING_SPEED)
-
-        step_line.set_value(0)
-
+        step_line.set_value(STEP_PIN, gpiod.line.Value.INACTIVE)
         time.sleep(HOMING_SPEED)
-
-        
 
     current_stepper_position = 0
 
     disable_motor()
 
-    print("✅ Hardware: Homed.")
-
+    print("Homed.")
 
 
 def map_angle_to_steps_non_linear(angle):
-
+    # Non-linear mapping: exponent > 1.0 provides finer center control
     exponent = 1.5
 
     normalized_input = (angle / 90.0) - 1.0
@@ -427,7 +377,6 @@ def map_angle_to_steps_non_linear(angle):
     return int(TOTAL_STEPS_FOR_180_DEGREES - target_steps)
 
 
-
 def set_stepper_angle(angle):
 
     global current_stepper_position
@@ -436,17 +385,17 @@ def set_stepper_angle(angle):
 
     target_step = max(0, min(TOTAL_STEPS_FOR_180_DEGREES, target_step))
 
-    
-
     diff = target_step - current_stepper_position
 
-    if diff == 0: return
-
-
+    if diff == 0:
+        return
 
     enable_motor()
 
-    direction = CLOCKWISE if diff > 0 else COUNTER_CLOCKWISE
+    # Determine direction based on position difference
+    # Positive diff: move away from limit switch (INACTIVE)
+    # Negative diff: move toward limit switch (ACTIVE)
+    direction = gpiod.line.Value.INACTIVE if diff > 0 else gpiod.line.Value.ACTIVE
 
     move_stepper_raw(abs(diff), direction)
 
@@ -454,117 +403,84 @@ def set_stepper_angle(angle):
 
     current_stepper_position = target_step
 
-    print(f"📐 Stepper: Moved to {angle}° (Step {target_step})")
-
+    print(f"Stepper: Moved to {angle}° (Step {target_step})")
 
 
 def swing_club(power_percent):
 
-    print(f"🏌️ Hardware: Swinging at {power_percent}%...")
+    print(f"Swinging at {power_percent}%...")
 
-    swing_range = SERVO_MAX_SWING_NS - SERVO_REST_POS_NS
+    # Boost power for weaker 5kg servo: scale 0-100% to 50-100% range
+    # This ensures even low power swings have enough force
+    boosted_power = 50 + (power_percent / 100.0) * 50
 
-    target_ns = int((power_percent / 100.0) * swing_range) + SERVO_REST_POS_NS
-
-    
-
-    pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", target_ns)
-
-    time.sleep(0.5)
-
+    # Start from neutral position
     pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", SERVO_REST_POS_NS)
+    time.sleep(0.2)
 
-    time.sleep(1.0)
+    # Calculate backswing position based on power
+    backswing_range = SERVO_MAX_SWING_NS - SERVO_REST_POS_NS
+    backswing_ns = int((boosted_power / 100.0) * backswing_range) + SERVO_REST_POS_NS
 
+    # Move to backswing position
+    pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", backswing_ns)
+    time.sleep(1.0)  # Hold backswing for 1 second
+
+    # Swing through to full forward position (hitting the ball)
+    pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", SERVO_FORWARD_SWING_NS)
+    time.sleep(1.0)  # Hold forward position
+
+    # Return to neutral/rest
+    pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", SERVO_REST_POS_NS)
+    time.sleep(0.5)
 
 
 def reset_ball_actuator():
+    print("Resetting ball...")
 
-    print("♻️ Hardware: Resetting ball...")
-
-    # Defensive: Try to get lines if global failed, but usually redundant now
+    ACT_PIN_1 = 17
+    ACT_PIN_2 = 27
 
     try:
+        # Request lines for the actuator
+        # v2: Request as block
+        config = {
+            ACT_PIN_1: gpiod.LineSettings(
+                direction=gpiod.line.Direction.OUTPUT,
+                output_value=gpiod.line.Value.INACTIVE,
+            ),
+            ACT_PIN_2: gpiod.LineSettings(
+                direction=gpiod.line.Direction.OUTPUT,
+                output_value=gpiod.line.Value.INACTIVE,
+            ),
+        }
 
-        l1 = gpiod_chip.get_line(17)
+        act_req = gpiod_chip.request_lines(consumer="actuator", config=config)
 
-        l2 = gpiod_chip.get_line(27)
+        period = int(1_000_000_000 / 1000)
+        pwm_write(ACTUATOR_PWM_CHIP, ACTUATOR_PWM_CHANNEL, "duty_cycle", period)
 
-        l1.request(consumer="act", type=gpiod.LINE_REQ_DIR_OUT)
+        # Extend
+        act_req.set_value(ACT_PIN_1, gpiod.line.Value.ACTIVE)
+        act_req.set_value(ACT_PIN_2, gpiod.line.Value.INACTIVE)
+        time.sleep(20)  # Extend for 20 seconds
 
-        l2.request(consumer="act", type=gpiod.LINE_REQ_DIR_OUT)
+        # Wait at full extension
+        act_req.set_value(ACT_PIN_1, gpiod.line.Value.INACTIVE)
+        act_req.set_value(ACT_PIN_2, gpiod.line.Value.INACTIVE)
+        time.sleep(3)  # Hold at full extension for 3 seconds
 
-    except:
+        # Retract
+        act_req.set_value(ACT_PIN_1, gpiod.line.Value.INACTIVE)
+        act_req.set_value(ACT_PIN_2, gpiod.line.Value.ACTIVE)
+        time.sleep(20)  # Retract for 20 seconds
 
-        # Lines likely already requested in setup_all, proceed using globals
+        # Stop
+        act_req.set_value(ACT_PIN_1, gpiod.line.Value.INACTIVE)
+        act_req.set_value(ACT_PIN_2, gpiod.line.Value.INACTIVE)
 
-        # Note: This snippet assumes you might want to grab them dynamically, 
+        # Stop PWM
+        pwm_write(ACTUATOR_PWM_CHIP, ACTUATOR_PWM_CHANNEL, "duty_cycle", 0)
 
-        # but strictly we should use the ones from setup_all. 
-
-        # For now, we rely on setup_all being successful.
-
-        pass
-
-
-
-    # Direct usage of handles from setup_all would be cleaner, but let's assume
-
-    # the caller wants to re-request.
-
-    # Actually, better to use the global gpiod logic:
-
-    # We will assume user calls this ONLY after setup_all.
-
-    
-
-    # Re-grabbing lines for local scope safety in this specific function style
-
-    # (Matches your working test file logic)
-
-    line1 = gpiod_chip.get_line(17)
-
-    line2 = gpiod_chip.get_line(27)
-
-    
-
-    # We check if they are free; if not, we assume we own them.
-
-    try: line1.request(consumer="act", type=gpiod.LINE_REQ_DIR_OUT)
-
-    except: pass
-
-    try: line2.request(consumer="act", type=gpiod.LINE_REQ_DIR_OUT)
-
-    except: pass
-
-
-
-    period = int(1_000_000_000 / 1000)
-
-    pwm_write(ACTUATOR_PWM_CHIP, ACTUATOR_PWM_CHANNEL, "duty_cycle", period)
-
-    
-
-    line1.set_value(1)
-
-    line2.set_value(0)
-
-    time.sleep(20)
-
-    
-
-    line1.set_value(0)
-
-    line2.set_value(1)
-
-    time.sleep(20)
-
-    
-
-    line1.set_value(0)
-
-    line2.set_value(0)
-
-    pwm_write(ACTUATOR_PWM_CHIP, ACTUATOR_PWM_CHANNEL, "duty_cycle", 0)
-
+    except Exception as e:
+        print(f"Error in Reset Ball: {e}")

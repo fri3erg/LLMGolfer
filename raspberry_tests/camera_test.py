@@ -3,14 +3,13 @@ import numpy as np
 from picamera2 import Picamera2
 import time
 
-# --- Tweakable Parameters ---
+# Tweakable Parameters
 # Define the range for white color in HSV color space
 # Hue: 0-179, Saturation: 0-255, Value: 0-255
 lower_white = np.array([0, 0, 180])
 upper_white = np.array([179, 40, 255])
 # Minimum area of the ball to be detected (filters out noise)
 min_ball_area = 500
-#-----------------------------
 
 # Initialize Picamera2
 picam2 = Picamera2()
@@ -42,7 +41,7 @@ try:
         # Find the largest contour, which should be the ball
         if contours:
             ball_contour = max(contours, key=cv2.contourArea)
-            
+
             # Check if the largest contour is big enough to be the ball
             if cv2.contourArea(ball_contour) > min_ball_area:
                 # 4. Calculate the center coordinates of the ball
@@ -58,9 +57,16 @@ try:
                     # Draw a circle at the center
                     cv2.circle(frame, (cX, cY), 7, (0, 0, 255), -1)
                     # Put the coordinates as text
-                    cv2.putText(frame, f"Ball at ({cX}, {cY})", (cX - 50, cY - 20),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-                    
+                    cv2.putText(
+                        frame,
+                        f"Ball at ({cX}, {cY})",
+                        (cX - 50, cY - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        2,
+                    )
+
                     # Print coordinates to the terminal
                     print(f"Ball detected at: X={cX}, Y={cY}")
                 else:
@@ -74,10 +80,10 @@ try:
         cv2.imshow("Golf Ball Detection", frame)
 
         # Exit if the 'q' key is pressed
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
-        
-        time.sleep(0.1) # Small delay to prevent overwhelming the CPU
+
+        time.sleep(0.1)  # Small delay to prevent overwhelming the CPU
 
 finally:
     # Cleanup

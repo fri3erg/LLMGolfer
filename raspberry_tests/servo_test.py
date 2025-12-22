@@ -1,102 +1,127 @@
-import lgpio
 import time
+import os
 
 # --- Configuration ---
-SERVO_PIN = 12  # GPIO 12 (Hardware PWM Channel 0)
-PWM_FREQUENCY = 50  # Standard frequency for servos is 50 Hz
+PWM_CHIP = 0
+PWM_CHANNEL = 3
+PWM_FREQUENCY = 50
 
-# Pulse widths in microseconds (µs). Adjust these to match your servo's range.
-# 500 µs is typically 0 degrees, 2500 µs is 180 degrees.
 MIN_PULSE = 500
 MAX_PULSE = 2500
+REST_POS = 1500  # Center/neutral
+BACKSWING_POS = 800  # Full backswing
+FORWARD_POS = 2500  # Full forward swing
 
-# Swing positions (as pulse widths).
-# 'REST' is the starting position of the club.
-# 'TOP_OF_SWING' is the furthest back it will go.
-REST_POS = 700
-TOP_OF_SWING = 2300
+# Global to track current position for smooth transitions
+current_servo_pos = REST_POS
 
-# --- Global Handle ---
-h = None
+PWM_BASE = f"/sys/class/pwm/pwmchip{PWM_CHIP}"
+PWM_PATH = f"{PWM_BASE}/pwm{PWM_CHANNEL}"
+PERIOD_NS = int(1_000_000_000 / PWM_FREQUENCY)
+
+
+def pwm_write(filename, value):
+    try:
+        with open(f"{PWM_PATH}/{filename}", "w") as f:
+            f.write(str(value))
+    except Exception as e:
+        print(f"Error: {e}")
+
 
 def setup_servo():
-    """Initialize the GPIO for PWM servo control."""
-    global h
-    try:
-        h = lgpio.gpiochip_open(0)  # Open the default GPIO chip
-        print("GPIO chip opened successfully.")
-    except Exception as e:
-        print(f"Error opening GPIO chip: {e}")
-        exit()
+    if not os.path.exists(PWM_PATH):
+        try:
+            with open(f"{PWM_BASE}/export", "w") as f:
+                f.write(str(PWM_CHANNEL))
+            time.sleep(0.1)
+        except Exception as e:
+            return False
+    pwm_write("period", PERIOD_NS)
+    return True
 
-def map_value(value, from_low, from_high, to_low, to_high):
-    """Maps a value from one range to another."""
-    return (value - from_low) * (to_high - to_low) / (from_high - from_low) + to_low
+
+def set_servo_position(pulse_width_us):
+    """Directly sets the PWM duty cycle."""
+    global current_servo_pos
+    duty_cycle_ns = int(pulse_width_us * 1000)
+    pwm_write("duty_cycle", duty_cycle_ns)
+    current_servo_pos = pulse_width_us
+
+
+def smooth_move(target_us, steps=30, delay=0.01):
+    """
+    Moves the servo in small increments to prevent amp spikes.
+    - steps: Higher number = slower/smoother move.
+    - delay: Time in seconds between steps.
+    """
+    global current_servo_pos
+
+    start_pos = current_servo_pos
+    if start_pos == target_us:
+        return
+
+    # Calculate step increment
+    diff = target_us - start_pos
+    step_inc = diff / steps
+
+    for i in range(1, steps + 1):
+        next_pos = int(start_pos + (step_inc * i))
+        set_servo_position(next_pos)
+        time.sleep(delay)
+
 
 def swing_club(power=100):
-    """
-    Swings the golf club.
-    
-    Args:
-        power (int): A value from 0 to 100. This determines the range of the swing.
-                     0 means no swing, 100 means a full swing.
-    """
     if not (0 <= power <= 100):
-        print("Power must be between 0 and 100.")
         return
 
-    if not h:
-        print("Servo not set up. Call setup_servo() first.")
-        return
-        
-    print(f"--- Swinging with {power}% power ---")
-    
-    # 1. Go to the resting position
-    lgpio.tx_pwm(h, SERVO_PIN, PWM_FREQUENCY, REST_POS)
-    print("At rest...")
-    time.sleep(1)
+    print(f"--- Swinging: {power}% power ---")
 
-    # 2. Calculate the swing endpoint based on power
-    # Map the 0-100 power to a point between REST and TOP_OF_SWING
-    swing_endpoint = int(map_value(power, 0, 100, REST_POS, TOP_OF_SWING))
-    
-    # 3. Perform the swing (move quickly to the endpoint)
-    print(f"Swinging to pulse width: {swing_endpoint}")
-    lgpio.tx_pwm(h, SERVO_PIN, PWM_FREQUENCY, swing_endpoint)
-    time.sleep(0.3) # The duration of the swing itself
+    # Enable PWM if not already
+    pwm_write("enable", "1")
 
-    # 4. Return to rest
-    print("Returning to rest...")
-    lgpio.tx_pwm(h, SERVO_PIN, PWM_FREQUENCY, REST_POS)
-    time.sleep(1)
+    # Boost power for weaker servo (50-100% range)
+    boosted_power = 50 + (power / 100.0) * 50
+
+    # Calculate backswing position based on power
+    backswing_range = BACKSWING_POS - REST_POS  # Negative range
+    backswing_pos = int((boosted_power / 100.0) * backswing_range) + REST_POS
+
+    # 1. Start from neutral
+    print(f"Moving to center ({REST_POS}µs)...")
+    set_servo_position(REST_POS)
+    time.sleep(0.2)
+
+    # 2. Backswing
+    print(f"Backswing to {backswing_pos}µs...")
+    set_servo_position(backswing_pos)
+    time.sleep(1.0)  # Hold backswing
+
+    # 3. Forward swing (hitting the ball)
+    print(f"Forward swing to {FORWARD_POS}µs...")
+    set_servo_position(FORWARD_POS)
+    time.sleep(1.0)  # Hold forward
+
+    # 4. Return to neutral
+    print(f"Return to center ({REST_POS}µs)...")
+    set_servo_position(REST_POS)
+    time.sleep(0.5)
+
 
 def cleanup():
-    """Stop PWM and release GPIO resources."""
-    if h:
-        try:
-            # Set duty cycle to 0 to stop the servo pulse
-            lgpio.tx_pwm(h, SERVO_PIN, PWM_FREQUENCY, 0)
-            lgpio.gpiochip_close(h)
-            print("GPIO cleaned up.")
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
+    pwm_write("enable", "0")
 
-# --- Main Program ---
+
 if __name__ == "__main__":
     try:
-        setup_servo()
+        if not setup_servo():
+            exit(1)
+
+        # Start at rest
+        set_servo_position(REST_POS)
+        pwm_write("enable", "1")
+
         while True:
-            # Demonstrate a few swings with different power levels
-            swing_club(power=50)  # A half-power swing
-            time.sleep(1)
-            
-            swing_club(power=100) # A full-power swing
-            time.sleep(1)
-            
-            swing_club(power=10) # A very gentle tap
-            time.sleep(1)
-        
+            swing_club(power=100)  # Only 100% power
+            time.sleep(2)
     except KeyboardInterrupt:
-        print("\nProgram stopped by user.")
-    finally:
         cleanup()

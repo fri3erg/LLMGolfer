@@ -1,0 +1,7 @@
+openai
+picamera2
+opencv-python-headless
+python-dotenv
+pyttsx3
+numpy
+piper-tts
