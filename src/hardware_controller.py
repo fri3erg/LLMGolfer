@@ -25,6 +25,10 @@ ENABLE_PIN = 22
 # Stepper calibration: steps required for 180 degree rotation
 TOTAL_STEPS_FOR_180_DEGREES = 300
 
+# Constant offset to shift the center point (90 degrees).
+# Negative value = moves strictly towards limit switch (counter-clockwise/home)
+STEPPER_CENTER_OFFSET = -10
+
 
 # Speeds
 
@@ -144,25 +148,10 @@ def setup_all():
 
     print("Attempting to open GPIO chip...")
 
-    # Try the configured path first
+    # Hardcoded for Raspberry Pi 5
+    target_chip = GPIO_CHIP_PATH # /dev/gpiochip4
 
-    target_chip = GPIO_CHIP_PATH
-
-    if not os.path.exists(target_chip):
-
-        print("Warning: {target_chip} not found. Searching for alternatives...")
-
-        # Fallback strategy: Check 0 to 5
-
-        for i in range(6):
-
-            if os.path.exists(f"/dev/gpiochip{i}"):
-
-                target_chip = f"/dev/gpiochip{i}"
-
-                break
-
-    print(f"Using {target_chip}")
+    print(f"Using Hardcoded GPIO Chip: {target_chip}")
 
     try:
 
@@ -221,32 +210,13 @@ def setup_all():
 
     print("Configuring PWM...")
 
-    # Dynamic PWM Chip Finder for Pi 5 / Pi 4
+    # Hardcoded for Raspberry Pi 5
     global SERVO_PWM_CHIP, ACTUATOR_PWM_CHIP
 
-    found_chip = None
-    potential_chips = [0, 2, 1, 3]
-
-    for i in potential_chips:
-        path = f"/sys/class/pwm/pwmchip{i}"
-        if os.path.exists(path):
-            try:
-                with open(f"{path}/npwm", "r") as f:
-                    npwm = int(f.read().strip())
-                if npwm >= 2:
-                    found_chip = i
-                    print(f"Found PWM Chip {i} with {npwm} channels.")
-                    break
-            except:
-                continue
-
-    if found_chip is not None:
-        SERVO_PWM_CHIP = found_chip
-        ACTUATOR_PWM_CHIP = found_chip
-    else:
-        print("PWM Warning: Could not find a suitable PWM chip. Defaulting to 0.")
-        SERVO_PWM_CHIP = 0
-        ACTUATOR_PWM_CHIP = 0
+    SERVO_PWM_CHIP = 0
+    ACTUATOR_PWM_CHIP = 0
+    
+    print(f"Using Hardcoded PWM Chip: {SERVO_PWM_CHIP}")
 
     for channel in [SERVO_PWM_CHANNEL, ACTUATOR_PWM_CHANNEL]:
         pwm_export(SERVO_PWM_CHIP, channel)
@@ -315,10 +285,7 @@ def disable_motor():
         enable_line.set_value(ENABLE_PIN, gpiod.line.Value.ACTIVE)  # 1 to Disable
 
 
-# =============================================================================
-# --- MOVEMENT ---
-# =============================================================================
-
+# movement
 
 def move_stepper_raw(steps, direction):
     # direction is 0 or 1
@@ -374,7 +341,13 @@ def map_angle_to_steps_non_linear(angle):
 
     target_steps = (eased_output + 1.0) / 2.0 * TOTAL_STEPS_FOR_180_DEGREES
 
-    return int(TOTAL_STEPS_FOR_180_DEGREES - target_steps)
+
+    target_steps = target_steps + STEPPER_CENTER_OFFSET
+    
+    final_steps = TOTAL_STEPS_FOR_180_DEGREES - target_steps
+    final_steps = final_steps + STEPPER_CENTER_OFFSET # Adding negative = reducing steps = closer to 0
+    
+    return int(final_steps)
 
 
 def set_stepper_angle(angle):
@@ -406,13 +379,35 @@ def set_stepper_angle(angle):
     print(f"Stepper: Moved to {angle}° (Step {target_step})")
 
 
+def move_servo_smooth(start_ns, end_ns, duration):
+    """
+    Moves the servo smoothly from start to end over duration seconds.
+    Used to simulate slower swing speeds for lower power.
+    """
+    # Use 10ms updates (100Hz) - smoother and less overhead than 5ms
+    update_interval = 0.01
+    steps = int(duration / update_interval)
+    
+    if steps < 1:
+        pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", end_ns)
+        return
+
+    step_ns = (end_ns - start_ns) / steps
+
+    for i in range(1, steps + 1):
+        current_ns = int(start_ns + (step_ns * i))
+        pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", current_ns)
+        time.sleep(update_interval)
+
+
 def swing_club(power_percent):
 
     print(f"Swinging at {power_percent}%...")
 
-    # Boost power for weaker 5kg servo: scale 0-100% to 50-100% range
-    # This ensures even low power swings have enough force
-    boosted_power = 50 + (power_percent / 100.0) * 50
+    # Boost power for weaker 5kg servo: scale 0-100% to 20-100% range
+    # Previous floor of 50 was set for "weak" servo but results in shots going too far.
+    # Lowering floor to 20 allows for shorter backswings.
+    boosted_power = 20 + (power_percent / 100.0) * 80
 
     # Start from neutral position
     pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", SERVO_REST_POS_NS)
@@ -427,7 +422,41 @@ def swing_club(power_percent):
     time.sleep(1.0)  # Hold backswing for 1 second
 
     # Swing through to full forward position (hitting the ball)
-    pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", SERVO_FORWARD_SWING_NS)
+    
+    # Speed Control Logic:
+    # If Power is High (>80%): Swing FAST (Direct write)
+    # If Power is Low: Swing slower (Smooth write)
+    
+    if power_percent > 80:
+        # Maximum Speed
+        print(f"Swing Mode: MAX SPEED (Direct Write)")
+        pwm_write(SERVO_PWM_CHIP, SERVO_PWM_CHANNEL, "duty_cycle", SERVO_FORWARD_SWING_NS)
+    else:
+        # Variable Speed
+        # Calculate duration: Lower power = Slower (Longer duration)
+        # Power 0% -> 3.0s duration (Extremely slow/Put-like)
+        # Power 80% -> 0.05s duration (Fast)
+        
+        # Previous max was 1.2, increasing to 3.0 to really slow it down
+        # Adjusted to 2.0 with linear curve to fix 60% being too fast
+        max_slow_duration = 2.0
+        
+        # Invert power for duration calculation (0 is slow, 80 is fast)
+        # Normalize 0-80 range to 0.0-1.0
+        normalized_speed = power_percent / 80.0
+        
+        # Use Linear curve. 
+        # previous squared curve made 60% (norm 0.75) -> 0.06 factor -> very fast.
+        # Linear: 60% -> 0.25 factor -> 0.5s duration (clearly distinct from max)
+        duration_factor = (1.0 - normalized_speed)
+        duration = max_slow_duration * duration_factor
+        
+        # Ensure a tiny minimum duration
+        duration = max(duration, 0.05)
+        
+        print(f"Swing Mode: SMOOTH. Duration: {duration:.3f}s. Start: {backswing_ns} -> End: {SERVO_FORWARD_SWING_NS}")
+        move_servo_smooth(backswing_ns, SERVO_FORWARD_SWING_NS, duration)
+
     time.sleep(1.0)  # Hold forward position
 
     # Return to neutral/rest
@@ -463,7 +492,7 @@ def reset_ball_actuator():
         # Extend
         act_req.set_value(ACT_PIN_1, gpiod.line.Value.ACTIVE)
         act_req.set_value(ACT_PIN_2, gpiod.line.Value.INACTIVE)
-        time.sleep(20)  # Extend for 20 seconds
+        time.sleep(25)  # Extend for 25 seconds
 
         # Wait at full extension
         act_req.set_value(ACT_PIN_1, gpiod.line.Value.INACTIVE)
@@ -473,7 +502,7 @@ def reset_ball_actuator():
         # Retract
         act_req.set_value(ACT_PIN_1, gpiod.line.Value.INACTIVE)
         act_req.set_value(ACT_PIN_2, gpiod.line.Value.ACTIVE)
-        time.sleep(20)  # Retract for 20 seconds
+        time.sleep(25)  # Retract for 25 seconds
 
         # Stop
         act_req.set_value(ACT_PIN_1, gpiod.line.Value.INACTIVE)

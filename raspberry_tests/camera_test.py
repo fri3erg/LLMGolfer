@@ -6,17 +6,31 @@ import time
 # Tweakable Parameters
 # Define the range for white color in HSV color space
 # Hue: 0-179, Saturation: 0-255, Value: 0-255
-lower_white = np.array([0, 0, 180])
-upper_white = np.array([179, 40, 255])
+# Tightened parameters to avoid detecting the floor
+# Increased Value to 200 (only bright things)
+# Decreased Saturation to 25 (only very white/grey things)
+lower_white = np.array([0, 0, 200])      
+upper_white = np.array([180, 25, 255])
+
 # Minimum area of the ball to be detected (filters out noise)
-min_ball_area = 500
+# Reduced to detect ball at max distance
+min_ball_area = 100
 
 # Initialize Picamera2
-picam2 = Picamera2()
-# Configure camera for a smaller, faster resolution suitable for processing
-config = picam2.create_preview_configuration(main={"size": (640, 480)})
-picam2.configure(config)
-picam2.start()
+try:
+    picam2 = Picamera2()
+    # Configure camera for a smaller, faster resolution suitable for processing
+    config = picam2.create_preview_configuration(main={"size": (640, 480)})
+    picam2.configure(config)
+    picam2.start()
+except IndexError:
+    print("\n[ERROR] No camera detected!")
+    print("Please check that your camera is connected correctly.")
+    print("Run 'python3 raspberry_tests/diagnose_camera.py' for more details.\n")
+    exit(1)
+except Exception as e:
+    print(f"\n[ERROR] Failed to initialize camera: {e}")
+    exit(1)
 
 print("Camera feed started. Looking for the golf ball...")
 print("Press 'q' in the preview window to stop.")
@@ -78,6 +92,8 @@ try:
 
         # Display the resulting frame
         cv2.imshow("Golf Ball Detection", frame)
+        # Display the mask for debugging
+        cv2.imshow("Mask Debug", mask)
 
         # Exit if the 'q' key is pressed
         if cv2.waitKey(1) & 0xFF == ord("q"):

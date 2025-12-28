@@ -32,7 +32,7 @@ def play_speech_piper(text: str, voice_model="en_US-lessac-medium"):
         
         if not os.path.exists(model_path):
             print(f"   [ERROR] Voice model not found at: {model_path}")
-ù            return
+            return
         
         # Create temporary WAV file
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
@@ -59,7 +59,21 @@ def play_speech_piper(text: str, voice_model="en_US-lessac-medium"):
             # On Linux/Mac, use aplay or afplay
             import shutil
             if shutil.which("aplay"):
-                subprocess.run(["aplay", tmp_path])
+                # Simple USB detection
+                device_arg = []
+                try:
+                    out = subprocess.run(["aplay", "-l"], capture_output=True, text=True).stdout
+                    for line in out.splitlines():
+                        if "USB" in line and "card" in line:
+                            # Format: card 2: ...
+                            card = line.split(":")[0].split()[1]
+                            device_arg = ["-D", f"plughw:{card},0"]
+                            print(f"   [INFO] Detected USB Audio at card {card}")
+                            break
+                except:
+                    pass
+                
+                subprocess.run(["aplay"] + device_arg + [tmp_path])
             elif shutil.which("afplay"):
                 subprocess.run(["afplay", tmp_path])
         

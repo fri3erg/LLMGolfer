@@ -3,23 +3,28 @@ import numpy as np
 import cv2
 from picamera2 import Picamera2
 
-# =============================================================================
-# --- VISION TUNING PARAMETERS ---
-# =============================================================================
+# vision tuning parameters
 
 # Camera resolution
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 
 # Minimum ball detection area (pixels)
-MIN_BALL_AREA = 50
+MIN_BALL_AREA = 100
+MAX_BALL_AREA = 4000
 
 # HSV color detection range for white ball
 # Adjust these values based on lighting conditions
-LOWER_WHITE = np.array([0, 0, 175])
-UPPER_WHITE = np.array([179, 80, 255])
+LOWER_WHITE = np.array([0, 0, 200])
+UPPER_WHITE = np.array([180, 25, 255])
 
-# =============================================================================
+# Field Coordinates (Bottom Left, Top Left, Top Right, Bottom Right)
+FIELD_CORNERS = np.array([
+    [570, 90],   # Bottom Left
+    [481, 337],  # Top Left
+    [94, 365],   # Top Right
+    [0, 70]      # Bottom Right
+], dtype=np.int32)
 
 
 class VisionSystem:
@@ -61,6 +66,13 @@ class VisionSystem:
             self.picam2 = None
         except Exception as e:
             print(f"VISION ERROR: Error stopping camera: {e}")
+
+    def is_point_in_quad(self, point, corners):
+        """
+        Checks if a point (x, y) is inside the quadrilateral defined by corners.
+        Uses OpenCV's pointPolygonTest.
+        """
+        return cv2.pointPolygonTest(corners, point, False) >= 0
 
     def get_live_ball_position(self):
         """
@@ -105,27 +117,38 @@ class VisionSystem:
                 largest_contour = max(contours, key=cv2.contourArea)
                 area = cv2.contourArea(largest_contour)
 
-                if area > MIN_BALL_AREA:
+                if MIN_BALL_AREA < area < MAX_BALL_AREA:
                     M = cv2.moments(largest_contour)
                     if M["m00"] != 0:
                         cX = int(M["m10"] / M["m00"])
                         cY = int(M["m01"] / M["m00"])
-                        ball_coords = (cX, cY)
+                        
+                        # Check if inside field boundaries
+                        if self.is_point_in_quad((cX, cY), FIELD_CORNERS):
+                            ball_coords = (cX, cY)
+                            debug_color = (0, 255, 0) # Green for valid
+                            status_text = f"Pos:{ball_coords} Area:{int(area)}"
+                            print(f"Ball found at {ball_coords} (Area: {area})")
+                        else:
+                            debug_color = (0, 0, 255) # Red for out of bounds
+                            status_text = f"OUT:{cX},{cY} Area:{int(area)}"
+                            print(f"Ball ignored at {cX},{cY} (Out of bounds)")
 
                         # Draw Debug Info
-                        cv2.drawContours(frame, [largest_contour], -1, (0, 255, 0), 2)
-                        cv2.circle(frame, (cX, cY), 5, (0, 0, 255), -1)
+                        cv2.drawContours(frame, [largest_contour], -1, debug_color, 2)
+                        cv2.circle(frame, (cX, cY), 5, debug_color, -1)
+                        if len(FIELD_CORNERS) > 0:
+                            cv2.polylines(frame, [FIELD_CORNERS], True, (255, 0, 0), 2)
+
                         cv2.putText(
                             frame,
-                            f"Pos:{ball_coords} Area:{int(area)}",
+                            status_text,
                             (cX - 20, cY - 20),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.5,
                             (255, 255, 255),
                             2,
                         )
-
-                        print(f"Ball found at {ball_coords} (Area: {area})")
                 else:
                     print(f"Object detected but too small (Area: {area})")
             else:

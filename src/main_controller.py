@@ -25,8 +25,27 @@ import vision_system
 # HOLE_Y = 112
 # HOLE_COORDS = (HOLE_X, HOLE_Y)
 
-# Win threshold: radius in pixels around the hole
-WIN_DISTANCE_THRESHOLD = 30
+
+def is_ball_in_hole(ball_pos, hole_pos):
+    """
+    Checks if ball is in hole using custom rectangular bounds.
+    Returns True if in hole, False otherwise.
+    """
+    if ball_pos is None or hole_pos is None:
+        return False
+        
+    dx = ball_pos[0] - hole_pos[0]
+    dy = ball_pos[1] - hole_pos[1]
+    
+    # Check X bounds (Left -60, Right +60)
+    if not (-60 <= dx <= 60):
+        return False
+        
+    # Check Y bounds (Up -40, Down +40)
+    if not (-40 <= dy <= 40):
+        return False
+        
+    return True
 
 
 def calibrate_hole_position():
@@ -37,11 +56,17 @@ def calibrate_hole_position():
     print("\nHole Calibration")
 
     # Detect ball position (which is in the hole)
-    hole_coords = vision_system.get_live_ball_position()
+    print("Waiting for ball in hole...")
+    while True:
+        hole_coords = vision_system.get_live_ball_position()
+        if hole_coords is not None:
+             break
+        
+        print("Ball not found. Requesting user action.")
+        audio_manager.play_speech("I cannot see the ball. Please place the ball in the hole for calibration.")
+        time.sleep(5)
 
-    if hole_coords is None:
-        print("ERROR: Could not detect ball. Please ensure ball is visible.")
-        sys.exit(1)
+    # hole_coords is guaranteed to be set here
 
     print(f"Hole position detected at: {hole_coords}")
 
@@ -82,6 +107,7 @@ def run_game():
             shot_count += 1
 
             print(f"\nShot {shot_count}")
+
 
             # Construct prompt
 
@@ -174,7 +200,7 @@ def run_game():
 
             # 7. Check Win Condition
 
-            if distance <= WIN_DISTANCE_THRESHOLD:
+            if is_ball_in_hole(ball_pos, hole_coords):
 
                 print("HOLE IN ONE!")
 

@@ -18,9 +18,10 @@ def get_fuzzy_feedback(ball_pos, hole_pos):
     dy = ball_pos[1] - hole_pos[1]
 
     # Distance thresholds in pixels (based on 640x480 resolution)
-    TINY_MISS = 20
-    MODERATE_MISS = 80
-    LARGE_MISS = 150
+    # Tightened thresholds for harsher feedback
+    TINY_MISS = 10
+    MODERATE_MISS = 60
+    LARGE_MISS = 120
 
     feedback_parts = []
 
