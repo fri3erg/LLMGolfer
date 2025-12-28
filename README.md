@@ -1,62 +1,144 @@
-# Autonomous Mini Golf Simulator: An LLM-Powered Golfer 🤖⛳
+# 🏌️‍♂️ LLMGolfer
 
-This project is an ambitious and innovative endeavor to create a miniature golf simulator where a Large Language Model (LLM) acts as the "golfer." The system leverages a combination of electronics, mechanical engineering, computer vision, and AI to demonstrate an autonomous, learning agent in a physical environment.
+> **Project for the Laboratory of Making Exam**
+>
+> This project demonstrates an autonomous system combining Computer Vision, AI (LLM), and Robotics.
 
-The core idea is to have the LLM make decisions on shot direction and force, receive visual feedback on the ball's outcome, and then adjust its strategy for subsequent shots. A unique and fun element is the LLM providing real-time commentary on its performance.
+**LLMGolfer** is an autonomous, AI-powered mini-golf robot. It uses **Computer Vision** to see the course, an **LLM (OpenAI GPT-4o)** to plan its shots and generate witty commentary, and a custom **Robotic Hardware** stack to aim and swing.
 
----
+## Features
 
-## Key Components
+- **Brain:** Powered by OpenAI's GPT-4o. The AI acts as a professional golfer named "Chip," aiming based on visual feedback and learning from previous shots.
+- **Vision:** Uses a Raspberry Pi Camera Module 3 with OpenCV to track the ball's position relative to the target.
+- **Voice:** Real-time neural text-to-speech using **Piper TTS**. Chip trash-talks when he misses and celebrates when he wins.
+- **Precision Hardware:**
+  - **Stepper Motor:** Controls the aim angle (45° - 135°).
+  - **Servo Motor:** Controls the swing power (0 - 100%).
+  - **Linear Actuator:** Automatically resets the ball to the tee after a miss.
 
-The project consists of two main, physically separate units.
+### The Course
 
-### 1. The "Robot Golfer" (Main Contraption)
-
-This is the active part, housing all the intelligence and motion systems.
-
-* **Raspberry Pi 5 (The Brain):** Chosen for its processing power, essential for Computer Vision and managing API calls to the LLM.
-* **Linear Positioning System (1-Axis Rail):** A **NEMA 17 Stepper Motor** with a **DRV8825 Driver** moves the golf club head precisely left and right along a linear rail, providing shot aiming.
-* **Striking Mechanism:** A **High-Torque Digital Metal Gear Servo** (15-20 kg-cm+) swings the golf club head to strike the ball. Its rotation speed directly controls the shot force.
-* **Computer Vision System:** A **Raspberry Pi Camera Module 3** captures high-resolution images of the golf course to detect the ball's final position.
-* **Audio Output:** A speaker to play the LLM's commentary.
-* **Power Management:** A single **24V DC, 10A-15A Switching Power Supply** powers the entire system. Two DC-DC Step-Down Buck Converters step down the voltage: one for the Raspberry Pi (to 5.1V) and one for the servo (to 5V/6V).
-* **Ball Reset System:** A fast, low-force **Linear Actuator** controlled by an H-Bridge Motor Driver tilts the entire playing surface to return the ball to the start.
-
-### 2. The "Green" (Playing Surface)
-
-This is a passive, independent physical component.
-
-* A flat, rigid platform with a grass surface.
-* It has a hole as the target for the golf ball.
-* It features a **tiltable design** that allows the linear actuator to tip it, resetting the game.
+Instead of a traditional hole, the target is a **Flag-Nail**. The objective is to hit the nail or stop the ball as close to it as possible ("Given" putt). The system calibrates by detecting this target and calculates accuracy based on distance to this point.
 
 ---
 
-## Project Logic & Workflow
+## Hardware Requirements
 
-The system operates on a closed-loop feedback system, allowing the LLM to learn and adapt.
+- **Raspberry Pi 5** (recommended for performance).
+- **Pi Camera Module 3**.
+- **Stepper Motor** + Driver (e.g., A4988/DRV8825).
+- **Servo Motor** (High toque).
+- **Linear Actuator** (12V).
+- **Button** (for physical start/stop control).
+- 3D Printed Parts (Chassis, Club Holder, Camera Mount).
 
-1. **Initial Calibration:** The user manually places the golf ball into the hole. The camera detects the hole's precise coordinates, saving them as the target.
-2. **Game Loop:**
-    * **Ball Reset:** The linear actuator tilts the Green, causing the ball to roll back to the starting point.
-    * **LLM Decision:** The Raspberry Pi sends the current game state (e.g., ball position relative to the hole) to the LLM via an API.
-    * **LLM Command:** The LLM, acting as the golfer, decides the next shot's lateral aim and strike force. These commands are sent back to the Pi.
-    * **Shot Execution:** The Pi translates the LLM's commands into precise movements for the stepper motor (aim) and the servo (force). The club then hits the ball.
-    * **Real-time Commentary:** Immediately after the shot, the LLM generates a commentary based on the outcome, which is played through the speaker.
-    * **Visual Feedback:** The computer vision system acquires a new photo to determine the ball's new resting position, providing the feedback for the next decision cycle.
+### Pinout Configuration (Default)
+
+| Component | Pin / Channel | Description |
+| :--- | :--- | :--- |
+| **Stepper Step** | GPIO 20 | Step signal |
+| **Stepper Dir** | GPIO 21 | Direction signal |
+| **Stepper Enable** | GPIO 22 | Enable signal (Active Low) |
+| **Limit Switch** | GPIO 4 | Homing switch |
+| **Servo** | GPIO 19 | PWM Chip 0, Channel 3 |
+| **Linear Actuator** | GPIO 18 | PWM Chip 0, Channel 2 |
+| **Start Button** | GPIO 16 | Physical control interface |
+
+> Note: Pin assignments can be modified in `src/hardware_controller.py`.
 
 ---
 
-## Key Technical Challenges
+## Installation
 
-* **Precise Mechanical Assembly:** Building the linear rail and tilt mechanism accurately is crucial for consistent performance.
-* **Motor Control:** Fine-tuning the stepper motor for positioning and the servo for speed-controlled impact.
-* **Computer Vision:** Robustly detecting the golf ball's position in images and accurately converting pixel coordinates to real-world measurements.
-* **LLM Integration & Prompt Engineering:** Crafting effective prompts for the LLM to interpret physical feedback and make intelligent, improving decisions.
-* **Power Management:** Designing a stable and safe power distribution system for multiple components with varying power needs.
+1. **Clone the repository:**
+
+    ```bash
+    git clone https://github.com/yourusername/LLMGolfer.git
+    cd LLMGolfer
+    ```
+
+2. **Set up Virtual Environment:**
+
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+
+3. **Install Dependencies:**
+
+    > **Warning:** `requirements.txt` may be incomplete. If you encounter `ModuleNotFoundError`, please install the missing package via pip.
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4. **Install Piper TTS (Voice Models):**
+    Follow the official [Piper TTS instructions](https://github.com/rhasspy/piper) to install the binary and download the `en_US-lessac-medium` voice model to your local data directory.
+
+5. **Environment Setup:**
+    Create a `.env` file in the root directory:
+
+    ```ini
+    OPENAI_API_KEY=your_sk_key_here
+    ```
 
 ---
 
-## Getting Started
+## Usage
 
-Future sections could include details on setting up the environment, code structure, and assembly instructions.
+### 1. Manual Start
+
+Run the main controller to start a game immediately:
+
+```bash
+python src/main_controller.py
+```
+
+### 2. Button Service (Production Mode)
+
+The system is designed to run headless on a Raspberry Pi, managed by a systemd service (or similar process supervisor). The `button_manager.py` script acts as the interface, monitoring a physical button to toggle the game state.
+
+```bash
+python src/button_manager.py
+```
+
+- **Press:** Starts the game loop (if stopped) or Resets it (if crashed).
+- **Press (while running):** Stops the game.
+
+### Game Loop Workflow
+
+1. **Calibration:** The bot detects the **flag-nail** position.
+2. **Setup:** The bot resets the ball to the tee.
+3. **Play:**
+    - The AI analyzes the previous shot.
+    - It decides on an **Aim Angle** and **Swing Force**.
+    - It speaks a commentary line.
+    - It takes the shot.
+    - It waits for the ball to stop and checks the camera.
+    - If it misses, it resets the ball and tries again.
+    - If it hits the target (within threshold), it celebrates!
+
+---
+
+## Project Structure
+
+- **`src/`**
+  - `main_controller.py`: The orchestrator. Manages the game flow.
+  - `llm_golfer.py`: Handles OpenAI API communication and prompt engineering.
+  - `hardware_controller.py`: Low-level interface for GPIO and PWM control.
+  - `vision_system.py`: OpenCV logic for ball detection and tracking.
+  - `audio_manager.py`: Text-to-Speech logic using Piper.
+  - `feedback_generator.py`: Translates vision data into natural language for the AI.
+
+- **`raspberry_tests/`**
+  - Contains individual test scripts (`test_servo.py`, `full_test.py`, etc.).
+  - > **Note:** These tests may be outdated compared to the main source code. Use them as a reference for hardware verification but expect potential adjustments needed.
+
+- **`report/`**: Contains the detailed project report (PDF).
+- **`images/`**: Contains photos and videos of the project in action.
+
+---
+
+## License
+
+[MIT License](LICENSE)
