@@ -40,8 +40,6 @@ logs/
 
 # Calibration data or captured images from testing
 calibration_data.json
-*.jpg
-*.png
 test_captures/
 
 .env
