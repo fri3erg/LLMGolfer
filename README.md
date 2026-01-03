@@ -6,7 +6,7 @@
 
 **S.I.S.I.F.O.** is an autonomous, AI-powered mini-golf robot built with reclaimed materials and advanced electronics. Inspired by the Greek myth of Sisyphus, the robot "obstinately" hits and retries shots, learning from its failures through a complex inner monologue.
 
-[**Watch the project in action on YouTube**](https://youtu.be/RGlZ7kFjT_A?si=QZfmthuxUeG2y_cD)
+[**Watch the project in action on YouTube**](https://youtu.be/mXfWZKT0qOs?si=NaiH9lyhwJaeD8hr)
 
 ---
 
