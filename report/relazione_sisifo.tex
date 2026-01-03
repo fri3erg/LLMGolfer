@@ -81,16 +81,26 @@ Nel settore commerciale, il robot \textit{LDRIC} (Launch Directional Robot Intel
 S.I.S.I.F.O., sebbene meccanicamente molto più rudimentale, basandosi su input visivi incerti e variabili, cerca di trovare a tentativi una combinazione vincente tra potenza e direzione indipendentemente dalla posizione della buca o da altre variabili.
 
 \subsubsection{Human Augmentation: "Stuff Made Here"}
-Il progetto "Automatic Golf Club" dello youtuber Shane Wighton (canale \textit{Stuff Made Here}) rappresenta un terzo approccio. Utilizza sensori inerziali (IMU) ad alta frequenza e servomotori ultra-rapidi per correggere lo swing umano in tempo reale, aggiustando l'angolo della faccia della mazza pochi millisecondi prima dell'impatto. 
+Il progetto "Automatic Golf Club" dello youtuber Shane Wighton (canale \textit{Stuff Made Here}) rappresenta un terzo approccio. Utilizza sensori inerziali (IMU) ad alta frequenza e servomotori ultra-rapidi per correggere lo swing umano in tempo reale, aggiustando l'angolo della faccia dell'iron pochi millisecondi prima dell'impatto per cambiare la distanza a cui viene lanciata la pallina. 
 
 Sebbene condivida lo spirito "novelty" di S.I.S.I.F.O., il fine è l'aumento delle capacità umane (Human Augmentation). La complessità ingegneristica e la presenza di un input umano si differenzia da questo progetto, in cui durante il loop principale nessun input è richiesto e il gioco è autonomo.
 
+\textbf{Aggiornamento Last-Minute (2 gennaio 2026):}
+\\
+Proprio a ridosso della conclusione di questo report, Shane Wighton ha pubblicato un nuovo video in cui evolve il concetto. Se il primo robot si occupava della distanza (variando l'angolo di un iron per il chipping), il nuovo sistema si concentra sul putting come fa S.I.S.I.F.O., correggendo la direzione del tiro verso la buca ma anche compensando in tempo reale tremolii o errori di inclinazione (tilt) dell'utente.
+\newpage
+
+Anche in questo caso, le differenze con S.I.S.I.F.O. sono tante:
+\begin{itemize}
+    \item \textbf{Visione:} Il sistema di Wighton usa triangolazione con multiple telecamere e marker a infrarossi sulla pallina; S.I.S.I.F.O. si affida a una singola camera e Computer Vision standard su una pallina comune.
+    \item \textbf{Predizione:} Wighton ha anticipato un secondo video dedicato interamente al software, che includerà simulazioni fisiche e algoritmi per prevedere i rimbalzi sulle sponde; S.I.S.I.F.O. invece, coerentemente con il suo nome, non prevede: osserva l'esito finale e "ritenta" con ostinazione.
+    \item \textbf{Filosofia del Campo:} Wighton necessita di un campo perfetto, senza rughe e con rimbalzi consistenti per far funzionare i suoi calcoli; S.I.S.I.F.O. abbraccia le irregolarità della tovaglia e del legno come variabili di gioco che contribuiscono a una performance meno deterministica e più randomica.
+\end{itemize}
 \subsection{Ingegneria Estrema}
 Oltre ai robot autonomi, esistono progetti che esplorano i limiti della fisica per puro spettacolo.
 \begin{itemize}
     \item \textbf{Mark Rober e il Razzo:} Il famoso youtuber Mark Rober ha creato una mazza da golf propulsa da razzi per massimizzare la distanza del drive. Anche qui, come in S.I.S.I.F.O., l'elemento "novelty" e lo spettacolo ingegneristico prevalgono sull'utilità pratica.
 \end{itemize}
-\newpage
 
 \subsection{Accessibilità}
 Esistono inoltre sistemi di assistenza motoria.
@@ -122,6 +132,7 @@ S.I.S.I.F.O. non si limita a sbagliare un tiro; si lamenta del fallimento o cele
 L'evoluzione naturale di questa categoria di robot "inutili" è l'aumento della multimodalità per il feedback e del gioco sociale. 
 
 Si può immaginare un'occasione in cui due S.I.S.I.F.O. competono autonomamente, creando una forma di teatrino robotico.
+\newpage
 
 \section{Costruzione Meccanica e Struttura}
 
@@ -155,14 +166,16 @@ Il design della mazza si discosta da quello tradizionale. I test effettuati con 
 \subsection{Sistema di Reset (Attuatore Lineare)}
 Per rendere il sistema autonomo, è stato implementato un meccanismo di ritorno della pallina. Un attuatore lineare a 12V è montato perpendicolarmente alla fine del campo, fissato con fascette e viti su un supporto di legno.
 
-La base dell'attuatore è stata allargata incollando vari spessori per maggiore stabilità. Quando l'attuatore si estende, solleva la piattaforma,inclinandola e riportando la pallina al punto di tiro.
-\textbf{Sfide Costruttive:} 
+La base dell'attuatore è stata allargata incollando vari spessori per maggiore stabilità. Quando l'attuatore si estende, solleva la piattaforma, inclinandola e riportando la pallina al punto di tiro.
+\\\\
+\textbf{Sfide Costruttive:} \\
 La sagomatura dei pezzi e il montaggio della struttura hanno richiesto un po' di precisione; in questo, la mia esperienza in ambito pratico e il fatto di vivere in un ambiente rurale hanno aiutato a gestire le lavorazioni del legno con i mezzi a mia disposizione. 
 
 Un dettaglio importante riguarda la trasportabilità: il supporto dell'attuatore è stato limato per permetterne la piegatura su entrambi i lati durante il trasporto. Grazie alla forza di spinta, il sistema si autocorregge comunque, allineandosi quando l'attuatore entra in funzione. 
 
 I cavi dell'attuatore sono stati stagnati e fissati lungo il bordo esterno della struttura con fascette per evitare intralci durante il sollevamento, e sono stati aggiunti supporti metallici laterali per evitare che solo una lastra si piegasse durante il sollevamento.
-\textbf{Problema e Soluzione:} 
+\\\\
+\textbf{Problema e Soluzione:} \\
 Inizialmente, la piattaforma era troppo lunga e l'attuatore riusciva a sollevarla solo di circa 15 gradi, angolo insufficiente per far rotolare indietro la pallina con un green più ruvido.
 
 La soluzione è stata segare via metà della seconda lastra, accorciandola. Questo ha permesso di raggiungere un'inclinazione di circa 25 gradi, sufficiente per il reset gravitazionale.
@@ -260,7 +273,7 @@ Inoltre, la logistica è stata complessa:
 \section{Software: AI e Integrazione}
 Dal punto di vista software, la sfida principale è stata l'integrazione delle librerie.
 \textbf{Text-to-Speech:} La libreria standard \textit{eSpeak} aveva una qualità vocale terribile, troppo robotica. Ho scelto di passare a \textbf{Piper TTS}, che offre voci neurali molto realistiche. Tuttavia, installare e configurare Piper sul Raspberry Pi ha richiesto una gestione alquanto complessa di dipendenze e pacchetti.
-\textbf{Goal:} Avere una buca fisica mobile era impratica. Si è scelto invece un chiodo con bandierina. Il software considera "buca" se la pallina colpisce il chiodo o/e si ferma entro una certa distanza.
+\textbf{La buca:} Avere una buca fisica mobile era impratica. Si è scelto invece un chiodo con bandierina. Il software considera "buca" se la pallina colpisce il chiodo o/e si ferma entro una certa distanza.
 
 \section{Conclusioni}
 Costruire S.I.S.I.F.O. è stato un esercizio di perseveranza. Oltre alla programmazione, ha richiesto abilità di falegnameria, progettazione elettrica e una notevole dose di problem-solving pratico. 
